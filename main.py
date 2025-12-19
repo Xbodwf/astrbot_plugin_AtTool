@@ -29,9 +29,8 @@ class LLMAtToolPlugin(Star):
             "    <description>协议用于在群聊中艾特(At)特定成员以引起注意。</description>\n"
             "    <workflow>\n"
             "        <step index='1'>判断是否需要艾特某人（如回复特定提问、提醒）。</step>\n"
-            "        <step index='2'>检查是否已知目标成员的 user_id (QQ号)。</step>\n"
-            "        <step index='3'>若未知，必须调用工具 `get_group_members` 获取成员列表。</step>\n"
-            "        <step index='4'>获取 user_id 后，在回复文本中直接插入标签。</step>\n"
+            "        <step index='2'>调用工具 `at_member(keyword)`，传入昵称/群名片/QQ号/角色。</step>\n"
+            "        <step index='3'>工具会自动查询并直接发送真实 At，不返回可见文本。</step>\n"
             "    </workflow>\n"
             "    <output_format>\n"
             "        <tag_syntax>[at:user_id]</tag_syntax>\n"
@@ -44,73 +43,63 @@ class LLMAtToolPlugin(Star):
             "</at_mention_protocol>\n"
         )
         req.system_prompt += instruction
-
-    # 群成员查询工具 (无限制返回)
-    @filter.llm_tool(name="get_group_members")
-    async def get_group_members(self, event: AstrMessageEvent, keyword: str = "") -> str:
-        """
-        查询群成员列表。当需要艾特(@)某人但不知道其 user_id 时调用此工具。
-        
-        Args:
-            keyword(string): 可选。搜索关键词（昵称/群名片/QQ号）。如果不填则返回所有成员。
-        """
-        start_time = time.time()
-        
-        # 环境检查
+    
+    @filter.llm_tool(name="at_member")
+    async def at_member(self, event: AstrMessageEvent, keyword: str = "") -> str:
         group_id = event.get_group_id()
-        if not group_id:
-            return json.dumps({"status": "error", "message": "当前不在群聊环境中，无法查询成员。"}, ensure_ascii=False)
-
-        if not isinstance(event, AiocqhttpMessageEvent):
-            return json.dumps({"status": "error", "message": "当前平台不支持获取群成员列表。"}, ensure_ascii=False)
-
+        if not group_id or not isinstance(event, AiocqhttpMessageEvent):
+            return ""
+        q = (keyword or "").strip().lstrip("@")
         try:
-            # 获取原始数据
             raw_members = await event.bot.api.call_action('get_group_member_list', group_id=group_id)
-            if not raw_members:
-                return json.dumps({"status": "error", "message": "获取成员列表为空或权限不足。"}, ensure_ascii=False)
-
-            # 数据清洗与格式化
-            formatted_members = []
-            
+        except Exception:
+            raw_members = []
+        if not raw_members:
+            return ""
+        role_map = {
+            "owner": "owner",
+            "admin": "admin",
+            "member": "member",
+            "群主": "owner",
+            "管理员": "admin",
+            "成员": "member",
+        }
+        resolved_uid = None
+        if q.isdigit():
+            resolved_uid = q
+        role_key = role_map.get(q.lower(), None)
+        if not resolved_uid and role_key:
             for m in raw_members:
-                user_id = str(m.get("user_id", ""))
-                nickname = m.get("nickname", "")
-                card = m.get("card", "") # 群名片
-                role = m.get("role", "member") # owner, admin, member
-                
-                # 搜索过滤
-                search_content = f"{user_id}{nickname}{card}"
-                if keyword and keyword not in search_content:
-                    continue
-
-                # 角色中文映射
-                role_map = {"owner": "群主", "admin": "管理员", "member": "成员"}
-                role_cn = role_map.get(role, "成员")
-
-                formatted_members.append({
-                    "user_id": user_id,
-                    "nickname": nickname,
-                    "group_card": card if card else "无",
-                    "role": role_cn
-                })
-
-            result_members = formatted_members
-
-            output_data = {
-                "status": "success",
-                "group_id": group_id,
-                "count": len(result_members),
-                "members": result_members
-            }
-
-            logger.debug(f"群成员查询成功，耗时 {time.time() - start_time:.2f}s，返回 {len(result_members)} 人")
-            # 返回 JSON 格式
-            return json.dumps(output_data, ensure_ascii=False, indent=2)
-
-        except Exception as e:
-            logger.error(f"查询群成员失败: {e}")
-            return json.dumps({"status": "error", "message": f"系统异常: {str(e)}"}, ensure_ascii=False)
+                if m.get("role", "member") == role_key:
+                    resolved_uid = str(m.get("user_id", ""))
+                    break
+        exact_uid = None
+        if not resolved_uid:
+            for m in raw_members:
+                uid = str(m.get("user_id", ""))
+                nickname = m.get("nickname", "") or ""
+                card = m.get("card", "") or ""
+                if q == nickname or q == card:
+                    exact_uid = uid
+                    break
+            if exact_uid:
+                resolved_uid = exact_uid
+        candidates = []
+        if not resolved_uid:
+            for m in raw_members:
+                uid = str(m.get("user_id", ""))
+                nickname = m.get("nickname", "") or ""
+                card = m.get("card", "") or ""
+                if q in nickname or (card and q in card):
+                    candidates.append(uid)
+            if candidates:
+                resolved_uid = candidates[0]
+        if resolved_uid:
+            result = event.get_result()
+            if result and hasattr(result, "chain"):
+                result.chain.append(At(qq=resolved_uid))
+                result.chain.append(Plain(""))
+        return ""
 
     # 消息处理与除杂
     @filter.on_decorating_result(priority=2)
