@@ -39,6 +39,11 @@ class LLMAtToolPlugin(Star):
     
     @filter.llm_tool(name="at_member")
     async def at_member(self, event: AstrMessageEvent, keyword: str = ""):
+        """At以提醒一个群成员
+        
+        Args:
+            keyword(str): 群成员的昵称/群名片/QQ号(如"张三"、"123456") 
+        """
         group_id = event.get_group_id()
         if not group_id or not isinstance(event, AiocqhttpMessageEvent):
             return
