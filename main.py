@@ -7,6 +7,7 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api import logger
 from astrbot.api.provider import ProviderRequest
 from astrbot.core.message.components import Plain, At, BaseMessageComponent
+import astrbot.api.message_components as Comp
 from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import AiocqhttpMessageEvent
 
 class LLMAtToolPlugin(Star):
@@ -37,17 +38,17 @@ class LLMAtToolPlugin(Star):
         req.system_prompt += instruction
     
     @filter.llm_tool(name="at_member")
-    async def at_member(self, event: AstrMessageEvent, keyword: str = "") -> str:
+    async def at_member(self, event: AstrMessageEvent, keyword: str = ""):
         group_id = event.get_group_id()
         if not group_id or not isinstance(event, AiocqhttpMessageEvent):
-            return ""
+            return
         q = (keyword or "").strip().lstrip("@")
         try:
             raw_members = await event.bot.api.call_action('get_group_member_list', group_id=group_id)
         except Exception:
             raw_members = []
         if not raw_members:
-            return ""
+            return
         role_map = {
             "owner": "owner",
             "admin": "admin",
@@ -87,8 +88,6 @@ class LLMAtToolPlugin(Star):
             if candidates:
                 resolved_uid = candidates[0]
         if resolved_uid:
-            result = event.get_result()
-            if result and hasattr(result, "chain"):
-                result.chain.append(At(qq=resolved_uid))
-                result.chain.append(Plain(""))
-        return ""
+            chain = [Comp.At(qq=resolved_uid)]
+            yield event.chain_result(chain)
+        return
