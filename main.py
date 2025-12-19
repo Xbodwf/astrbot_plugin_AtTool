@@ -32,14 +32,6 @@ class LLMAtToolPlugin(Star):
             "        <step index='2'>调用工具 `at_member(keyword)`，传入昵称/群名片/QQ号/角色。</step>\n"
             "        <step index='3'>工具会自动查询并直接发送真实 At，不返回可见文本。</step>\n"
             "    </workflow>\n"
-            "    <output_format>\n"
-            "        <tag_syntax>[at:user_id]</tag_syntax>\n"
-            "        <requirement>直接输出标签，不要使用 Markdown 链接或 @昵称。</requirement>\n"
-            "    </output_format>\n"
-            "    <examples>\n"
-            "        <correct>好的 [at:123456] 我明白了。</correct>\n"
-            "        <incorrect>@张三 , [at:张三]</incorrect>\n"
-            "    </examples>\n"
             "</at_mention_protocol>\n"
         )
         req.system_prompt += instruction
@@ -100,57 +92,3 @@ class LLMAtToolPlugin(Star):
                 result.chain.append(At(qq=resolved_uid))
                 result.chain.append(Plain(""))
         return ""
-
-    # 消息处理与除杂
-    @filter.on_decorating_result(priority=2)
-    async def process_at_tags(self, event: AstrMessageEvent):
-        """
-        拦截消息：
-        1. 将 [at:123456] 转换为真实 At 组件。
-        2. (修改后) 不再清除格式错误的 [at:xxx] 标签。
-        """
-        result = event.get_result()
-        if not result or not result.chain:
-            return
-
-        has_tag = False
-        for comp in result.chain:
-            if isinstance(comp, Plain) and "[at:" in comp.text:
-                has_tag = True
-                break
-        
-        if not has_tag:
-            return
-
-        new_chain: List[BaseMessageComponent] = []
-
-        for comp in result.chain:
-            if isinstance(comp, Plain):
-                text = comp.text
-                
-                last_idx = 0
-                # 查找所有合法的 [at:数字]
-                for match in self.valid_at_pattern.finditer(text):
-                    start, end = match.span()
-
-                    # 处理标签前的文本
-                    if start > last_idx:
-                        # 只添加标签前的文本，不做任何过滤
-                        new_chain.append(Plain(text[last_idx:start]))
-                    
-                    target_id = match.group(1)
-                    
-                    # 插入真实组件
-                    new_chain.append(At(qq=target_id))
-                    # 可以考虑在@后加一个空格，避免粘连
-                    new_chain.append(Plain(" "))
-
-                    last_idx = end
-
-                # 处理最后一个标签后的剩余文本
-                if last_idx < len(text):
-                    new_chain.append(Plain(text[last_idx:]))
-            else:
-                new_chain.append(comp)
-        
-        result.chain = new_chain
