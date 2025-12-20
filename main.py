@@ -32,6 +32,7 @@ class LLMAtToolPlugin(Star):
             "        <step index='1'>判断是否需要艾特某人（如回复特定提问、提醒）。</step>\n"
             "        <step index='2'>调用工具 `at_member(keyword)`，传入昵称/群名片/QQ号/角色。</step>\n"
             "        <step index='3'>工具会自动查询并直接发送真实 At，不返回可见文本。</step>\n"
+            "        <tip>切记不要空at.即只at某人但是不说话(不礼貌)</tip>\n"
             "    </workflow>\n"
             "</at_mention_protocol>\n"
         )
